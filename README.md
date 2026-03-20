@@ -84,7 +84,7 @@ cd skedoodle-opentdf
 make install
 ```
 
-This installs client and server dependencies and applies database migrations. The `.env` files are committed with defaults for local development (Keycloak at `localhost:8888`, OpenTDF at `localhost:8080`). No configuration needed unless your ports differ.
+This installs client and server dependencies, generates the Prisma client, and applies database migrations. The `.env` files are committed with defaults for local development (Keycloak at `localhost:8888`, OpenTDF at `localhost:8080`). No configuration needed unless your ports differ.
 
 ### 3. Seed Keycloak
 

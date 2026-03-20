@@ -4,6 +4,7 @@
 install:
 	cd client && pnpm install
 	cd server && pnpm install
+	cd server && npx prisma generate
 	cd server && npx prisma migrate deploy
 
 ## seed - Create Keycloak client and test users (requires OpenTDF platform running)
