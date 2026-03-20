@@ -77,6 +77,7 @@ export const requireAuth = async (
   try {
     const decoded = await verifyOidcToken(token);
     (req as any).userId = decoded.userId;
+    (req as any).username = decoded.username;
     next();
   } catch (err) {
     console.error("Token verification failed:", err);

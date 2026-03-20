@@ -4,12 +4,10 @@ import {
   storageClient,
   SketchMeta,
 } from "@/services/storage.client";
-import { IconPlus, IconEdit, IconClock, IconUser, IconTrash, IconPencil, IconWorld, IconWorldOff, IconDoorExit } from "@tabler/icons-react";
+import { IconPlus, IconEdit, IconClock, IconUser, IconTrash, IconPencil, IconDoorExit } from "@tabler/icons-react";
 import { ulid } from "ulid";
 import { useAuthStore } from "@/stores/auth.store";
-import { Navbar, NavTab } from "./navbar";
-
-type Tab = "community" | "mine";
+import { Navbar } from "./navbar";
 
 const EditableTitle = ({
   name,
@@ -101,9 +99,7 @@ function getRelativeTime(ts: number): string {
 
 export const SketchesPage = () => {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<Tab>("community");
   const [sketches, setSketches] = useState<SketchMeta[]>([]);
-  const [communitySketches, setCommunitySketches] = useState<SketchMeta[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const { user } = useAuthStore();
 
@@ -121,19 +117,9 @@ export const SketchesPage = () => {
     }
   }
 
-  async function loadCommunitySketches() {
-    try {
-      const metas = await storageClient.getCommunitySketches();
-      setCommunitySketches(metas);
-    } catch (error) {
-      console.error("Failed to load community sketches:", error);
-    }
-  }
-
   // eslint-disable-next-line react-hooks/exhaustive-deps, react-hooks/set-state-in-effect
   useEffect(() => {
     if (user) loadSketches();
-    loadCommunitySketches();
   }, []);
 
   async function handleNewSketch() {
@@ -158,21 +144,11 @@ export const SketchesPage = () => {
     await storageClient.setSketchMeta(id, { name: newName });
   }
 
-  async function handleTogglePublic(meta: SketchMeta) {
-    const newPublic = !meta.public;
-    setSketches((prev) =>
-      prev.map((s) => (s.id === meta.id ? { ...s, public: newPublic } : s))
-    );
-    await storageClient.setSketchMeta(meta.id, { public: newPublic } as any);
-    loadCommunitySketches();
-  }
-
   async function handleDelete(id: string) {
     if (!user) return;
     try {
       await storageClient.deleteSketch(id);
       loadSketches();
-      loadCommunitySketches();
     } catch (error) {
       console.error("Failed to delete sketch:", error);
     }
@@ -187,69 +163,44 @@ export const SketchesPage = () => {
     }
   }
 
-  const displayedSketches = activeTab === "community" ? communitySketches : sketches;
-  const isOwnerView = activeTab === "mine";
-
   return (
     <main className="w-dvw h-dvh bg-default-0 text-text-primary flex flex-col">
-      <Navbar>
-        <NavTab active={activeTab === "community"} onClick={() => setActiveTab("community")}>
-          Community
-        </NavTab>
-        {user && (
-          <NavTab active={activeTab === "mine"} onClick={() => setActiveTab("mine")}>
-            My Sketches
-          </NavTab>
-        )}
-      </Navbar>
+      <Navbar />
       <div className="flex-grow overflow-y-auto p-8 bg-gradient-to-br from-default-0 to-default-1">
         <div className="max-w-7xl mx-auto">
           <div className="flex items-center justify-between mb-8">
             <div>
-              <h2 className="text-2xl font-semibold mb-1">
-                {activeTab === "community" ? "Community Sketches" : "My Sketches"}
-              </h2>
+              <h2 className="text-2xl font-semibold mb-1">My Sketches</h2>
               <p className="text-sm text-text-secondary">
-                {displayedSketches.length} {displayedSketches.length === 1 ? "sketch" : "sketches"}
+                {sketches.length} {sketches.length === 1 ? "sketch" : "sketches"}
               </p>
             </div>
-            {isOwnerView && (
-              <button
-                onClick={handleNewSketch}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary text-text-primary text-sm font-medium hover:opacity-90 transition-opacity shadow-lg"
-              >
-                <IconPlus size={18} stroke={2} />
-                New Sketch
-              </button>
-            )}
+            <button
+              onClick={handleNewSketch}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary text-text-primary text-sm font-medium hover:opacity-90 transition-opacity shadow-lg"
+            >
+              <IconPlus size={18} stroke={2} />
+              New Sketch
+            </button>
           </div>
-          {displayedSketches.length === 0 && (
+          {sketches.length === 0 && (
             <div className="text-center py-24">
               <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-default-2 mb-4">
                 <IconEdit size={32} stroke={1.5} className="text-text-secondary" />
               </div>
-              {activeTab === "community" ? (
-                <>
-                  <h3 className="text-lg font-medium mb-2">No community sketches yet</h3>
-                  <p className="text-sm text-text-secondary">Be the first to publish a sketch</p>
-                </>
-              ) : (
-                <>
-                  <h3 className="text-lg font-medium mb-2">No sketches yet</h3>
-                  <p className="text-sm text-text-secondary mb-6">Create your first sketch to get started</p>
-                  <button
-                    onClick={handleNewSketch}
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-text-primary text-sm font-medium hover:opacity-90 transition-opacity"
-                  >
-                    <IconPlus size={18} stroke={2} />
-                    Create Sketch
-                  </button>
-                </>
-              )}
+              <h3 className="text-lg font-medium mb-2">No sketches yet</h3>
+              <p className="text-sm text-text-secondary mb-6">Create your first sketch to get started</p>
+              <button
+                onClick={handleNewSketch}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-text-primary text-sm font-medium hover:opacity-90 transition-opacity"
+              >
+                <IconPlus size={18} stroke={2} />
+                Create Sketch
+              </button>
             </div>
           )}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {displayedSketches.map((meta) => (
+            {sketches.map((meta) => (
               <div
                 key={meta.id}
                 className="bg-default-2 rounded-xl border border-default-3 hover:border-default-4 transition-all duration-200 overflow-hidden group shadow-md hover:shadow-xl"
@@ -264,12 +215,12 @@ export const SketchesPage = () => {
                 </button>
                 <div className="p-4">
                   <div className="flex items-center gap-2 mb-2">
-                    {isOwnerView && meta.role && meta.role !== 'owner' && (
+                    {meta.role && meta.role !== 'owner' && (
                       <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-500/20 text-blue-400 flex-shrink-0">
                         Shared
                       </span>
                     )}
-                    {isOwnerView && meta.role === 'owner' ? (
+                    {meta.role === 'owner' ? (
                       <EditableTitle
                         name={meta.name}
                         editing={editingId === meta.id}
@@ -290,7 +241,7 @@ export const SketchesPage = () => {
                     </div>
                     <div className="flex items-center gap-1.5">
                       <IconUser size={14} stroke={1.5} />
-                      <span>{isOwnerView && meta.role === 'owner' ? "You" : meta.ownerName ?? "Unknown"}</span>
+                      <span>{meta.role === 'owner' ? "You" : meta.ownerName ?? "Unknown"}</span>
                     </div>
                   </div>
                   <div className="mt-3 pt-3 border-t border-default-3 flex items-center justify-between text-xs text-text-secondary">
@@ -298,20 +249,8 @@ export const SketchesPage = () => {
                     <span>{formatTime(meta.updatedAt)}</span>
                   </div>
                 </div>
-                {isOwnerView && meta.role === 'owner' && (
+                {meta.role === 'owner' && (
                   <div className="px-4 pb-3 flex items-center gap-2">
-                    <button
-                      onClick={() => handleTogglePublic(meta)}
-                      className={`flex items-center gap-1.5 px-2 py-1 rounded transition-colors text-xs opacity-0 group-hover:opacity-100 ${
-                        meta.public
-                          ? "text-green-400 hover:bg-green-500/10"
-                          : "text-text-secondary hover:bg-default-3 hover:text-text-primary"
-                      }`}
-                      title={meta.public ? "Unpublish sketch" : "Publish sketch"}
-                    >
-                      {meta.public ? <IconWorld size={12} stroke={1.5} /> : <IconWorldOff size={12} stroke={1.5} />}
-                      <span>{meta.public ? "Public" : "Publish"}</span>
-                    </button>
                     <button
                       onClick={() => setEditingId(meta.id)}
                       className="flex items-center gap-1.5 px-2 py-1 rounded text-text-secondary hover:bg-default-3 hover:text-text-primary transition-colors text-xs opacity-0 group-hover:opacity-100"
@@ -330,7 +269,7 @@ export const SketchesPage = () => {
                     </button>
                   </div>
                 )}
-                {isOwnerView && meta.role === 'collaborator' && (
+                {meta.role === 'collaborator' && (
                   <div className="px-4 pb-3 flex items-center gap-2">
                     <button
                       onClick={() => handleLeave(meta.id)}

@@ -25,7 +25,7 @@ userManager.events.addUserUnloaded(() => {
 class AuthService {
     login() {
         const returnTo = sessionStorage.getItem('returnTo');
-        return userManager.signinRedirect(returnTo ? { state: returnTo } : undefined);
+        return userManager.signinRedirect({ prompt: 'login', ...(returnTo ? { state: returnTo } : {}) });
     }
 
     async handleCallback(): Promise<{ id: string; username: string; returnTo?: string }> {

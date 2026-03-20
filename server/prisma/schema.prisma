@@ -11,14 +11,13 @@ datasource db {
 }
 
 model User {
-  id             String               @id @default(cuid())
-  username       String               @unique
-  oidcSub        String               @unique
-  createdAt      DateTime             @default(now())
-  updatedAt      DateTime             @updatedAt
-  commands       Command[]
-  sketches       Sketch[]
-  collaborations SketchCollaborator[]
+  id        String    @id @default(cuid())
+  username  String    @unique
+  oidcSub   String    @unique
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  commands  Command[]
+  sketches  Sketch[]
 }
 
 model Sketch {
@@ -28,13 +27,11 @@ model Sketch {
   positionX Float?
   positionY Float?
   zoom      Float?
-  public    Boolean  @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  owner         User                 @relation(fields: [ownerId], references: [id])
-  ownerId       String
-  commands      Command[]
-  collaborators SketchCollaborator[]
+  owner     User     @relation(fields: [ownerId], references: [id])
+  ownerId   String
+  commands  Command[]
 }
 
 model Command {
@@ -47,16 +44,4 @@ model Command {
   sketchId String
   user     User     @relation(fields: [uid], references: [id])
   sketch   Sketch   @relation(fields: [sketchId], references: [id])
-}
-
-model SketchCollaborator {
-  id        String   @id @default(cuid())
-  sketchId  String
-  userId    String
-  role      String   @default("collaborator")
-  createdAt DateTime @default(now())
-  sketch    Sketch   @relation(fields: [sketchId], references: [id], onDelete: Cascade)
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([sketchId, userId])
 }

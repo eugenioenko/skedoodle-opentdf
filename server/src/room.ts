@@ -137,6 +137,17 @@ export class Room {
     }
   }
 
+  kickClientByUsername(username: string) {
+    for (const [ws, client] of this.clients.entries()) {
+      if (client.user.name === username) {
+        ws.send(JSON.stringify({ type: 'access-revoked' }));
+        ws.close();
+        this.removeClient(ws);
+        break;
+      }
+    }
+  }
+
   destroy() {
     console.log(`[Room:${this.sketchId}] Room destroyed.`);
     if (this.cleanupTimeout) {

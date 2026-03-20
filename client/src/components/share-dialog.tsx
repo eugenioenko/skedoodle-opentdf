@@ -3,7 +3,7 @@ import { storageClient, Collaborator } from '@/services/storage.client';
 import { useSyncStore } from '@/sync/sync.store';
 import { useAuthStore } from '@/stores/auth.store';
 import { IconUserPlus, IconTrash, IconCrown, IconX } from '@tabler/icons-react';
-import { Dialog, DialogHeader, DialogBody } from './ui/dialog';
+import { Dialog, DialogBody } from './ui/dialog';
 
 export const ShareDialog = ({
   sketchId,
@@ -17,7 +17,7 @@ export const ShareDialog = ({
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const role = useSyncStore(s => s.role);
-  const currentUserId = useAuthStore(s => s.user?.id);
+  const currentUsername = useAuthStore(s => s.user?.username);
   const isOwner = role === 'owner';
 
   useEffect(() => {
@@ -44,9 +44,9 @@ export const ShareDialog = ({
     }
   }
 
-  async function handleRemove(userId: string) {
+  async function handleRemove(targetUsername: string) {
     try {
-      await storageClient.removeCollaborator(sketchId, userId);
+      await storageClient.removeCollaborator(sketchId, targetUsername);
       loadCollaborators();
     } catch (err: any) {
       setError(err.message || 'Failed to remove collaborator');
@@ -88,14 +88,14 @@ export const ShareDialog = ({
 
         <div className="space-y-2 max-h-60 overflow-y-auto pb-4">
           {collaborators.map(c => (
-            <div key={c.userId} className="flex items-center justify-between px-3 py-2 rounded-lg bg-default-2">
+            <div key={c.username} className="flex items-center justify-between px-3 py-2 rounded-lg bg-default-2">
               <div className="flex items-center gap-2">
                 <div className="w-7 h-7 rounded-full bg-primary flex items-center justify-center text-xs font-medium">
                   {c.username.slice(0, 2).toUpperCase()}
                 </div>
                 <div>
                   <span className="text-sm font-medium">{c.username}</span>
-                  {c.userId === currentUserId && (
+                  {c.username === currentUsername && (
                     <span className="text-xs text-text-secondary ml-1">(you)</span>
                   )}
                 </div>
@@ -103,11 +103,11 @@ export const ShareDialog = ({
                   <IconCrown size={14} stroke={1.5} className="text-yellow-500" />
                 )}
               </div>
-              {c.role !== 'owner' && (isOwner || c.userId === currentUserId) && (
+              {c.role !== 'owner' && (isOwner || c.username === currentUsername) && (
                 <button
-                  onClick={() => handleRemove(c.userId)}
+                  onClick={() => handleRemove(c.username)}
                   className="p-1 rounded text-text-secondary hover:bg-red-500/10 hover:text-red-400 transition-colors"
-                  title={c.userId === currentUserId ? 'Leave sketch' : 'Remove collaborator'}
+                  title={c.username === currentUsername ? 'Leave sketch' : 'Remove collaborator'}
                 >
                   <IconTrash size={14} stroke={1.5} />
                 </button>

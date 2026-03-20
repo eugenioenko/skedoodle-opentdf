@@ -7,50 +7,49 @@ const router = Router();
 
 const sketchSelect = {
   id: true, name: true, color: true, positionX: true, positionY: true,
-  zoom: true, public: true, createdAt: true, updatedAt: true, ownerId: true,
+  zoom: true, createdAt: true, updatedAt: true, ownerId: true,
 } as const;
 
-router.get('/community', async (_req, res) => {
-  try {
-    const sketches = await prisma.sketch.findMany({
-      where: { public: true },
-      select: {
-        id: true, name: true, color: true, public: true,
-        createdAt: true, updatedAt: true, ownerId: true,
-        owner: { select: { username: true } },
-      },
-      orderBy: { updatedAt: 'desc' },
-    });
-    res.json(sketches.map(s => ({
-      ...s,
-      ownerName: s.owner.username,
-      owner: undefined,
-    })));
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// GET all sketches for the authenticated user (owned + collaborated)
+// GET all sketches for the authenticated user (owned + ABAC-granted)
 router.get('/', requireAuth, async (req: any, res) => {
   try {
-    const collaborations = await prisma.sketchCollaborator.findMany({
-      where: { userId: req.userId },
-      select: { sketchId: true, role: true },
-    });
-    const sketchIds = collaborations.map(c => c.sketchId);
-    const roleMap = new Map(collaborations.map(c => [c.sketchId, c.role]));
-    const sketches = await prisma.sketch.findMany({
-      where: { id: { in: sketchIds } },
-      select: { ...sketchSelect, owner: { select: { username: true } } },
-      orderBy: { updatedAt: 'desc' },
-    });
-    res.json(sketches.map(s => ({
-      ...s,
-      role: roleMap.get(s.id) || 'viewer',
-      ownerName: s.owner.username,
-      owner: undefined,
-    })));
+    const [ownedSketches, abacSketchIds] = await Promise.all([
+      prisma.sketch.findMany({
+        where: { ownerId: req.userId },
+        select: { ...sketchSelect, owner: { select: { username: true } } },
+        orderBy: { updatedAt: 'desc' },
+      }),
+      opentdfService.listSketchIdsForUser(req.username),
+    ]);
+
+    const ownedIds = new Set(ownedSketches.map(s => s.id));
+    const sharedIds = abacSketchIds.filter(id => !ownedIds.has(id));
+
+    let sharedSketches: typeof ownedSketches = [];
+    if (sharedIds.length > 0) {
+      sharedSketches = await prisma.sketch.findMany({
+        where: { id: { in: sharedIds } },
+        select: { ...sketchSelect, owner: { select: { username: true } } },
+        orderBy: { updatedAt: 'desc' },
+      });
+    }
+
+    const result = [
+      ...ownedSketches.map(s => ({
+        ...s,
+        role: 'owner' as const,
+        ownerName: s.owner.username,
+        owner: undefined,
+      })),
+      ...sharedSketches.map(s => ({
+        ...s,
+        role: 'collaborator' as const,
+        ownerName: s.owner.username,
+        owner: undefined,
+      })),
+    ].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+
+    res.json(result);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -65,15 +64,15 @@ router.post('/', requireAuth, async (req: any, res) => {
         id: id || undefined,
         name: name || 'Untitled Sketch',
         owner: { connect: { id: req.userId } },
-        collaborators: {
-          create: { userId: req.userId, role: 'owner' },
-        },
       },
     });
-    // Register sketch as an OpenTDF attribute value (non-blocking)
-    opentdfService.ensureSketchAttributeValue(newSketch.id).catch(err =>
-      console.warn(`[OpenTDF] Failed to register sketch ${newSketch.id}:`, err)
-    );
+    // Register sketch attribute value + create owner subject mapping
+    try {
+      await opentdfService.ensureSketchAttributeValue(newSketch.id);
+      await opentdfService.createSubjectMapping(req.username, newSketch.id);
+    } catch (err) {
+      console.warn(`[OpenTDF] Failed to set up ABAC for sketch ${newSketch.id}:`, err);
+    }
     res.status(201).json(newSketch);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -84,37 +83,40 @@ router.post('/', requireAuth, async (req: any, res) => {
 router.get('/:id', requireAuth, async (req: any, res) => {
   try {
     const { id } = req.params;
+
+    // ABAC gate
+    const abacAllowed = await opentdfService.checkAccess(req.username, id);
+    if (!abacAllowed) {
+      res.status(403).json({ error: 'Access denied by policy' });
+      return;
+    }
+
     const sketch = await prisma.sketch.findFirst({
-      where: {
-        id,
-        OR: [
-          { collaborators: { some: { userId: req.userId } } },
-          { public: true },
-        ],
-      },
+      where: { id },
       select: {
         ...sketchSelect,
         owner: { select: { username: true } },
-        collaborators: {
-          select: { userId: true, role: true, user: { select: { username: true } } },
-        },
       },
     });
     if (!sketch) {
       res.status(404).json({ error: 'Sketch not found' });
       return;
     }
-    const collab = sketch.collaborators.find(c => c.userId === req.userId);
+
+    // Get collaborators from OpenTDF
+    const mappings = await opentdfService.listSubjectMappingsForSketch(id);
+    const collaborators = mappings.map(m => ({
+      username: m.username,
+      role: m.username === sketch.owner.username ? 'owner' : 'collaborator',
+    }));
+
+    const isOwner = sketch.ownerId === req.userId;
     res.json({
       ...sketch,
-      role: collab?.role || 'viewer',
+      role: isOwner ? 'owner' : 'collaborator',
       ownerName: sketch.owner.username,
       owner: undefined,
-      collaborators: sketch.collaborators.map(c => ({
-        userId: c.userId,
-        username: c.user.username,
-        role: c.role,
-      })),
+      collaborators,
     });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -126,13 +128,11 @@ router.put('/:id', requireAuth, async (req: any, res) => {
   try {
     const { id } = req.params;
     const { name, color } = req.body;
-    const isPublic = req.body.public;
     const updatedSketch = await prisma.sketch.update({
       where: { id, ownerId: req.userId },
       data: {
         ...(name !== undefined && { name }),
         ...(color !== undefined && { color }),
-        ...(isPublic !== undefined && { public: isPublic }),
         updatedAt: new Date(),
       },
     });
@@ -159,15 +159,14 @@ router.delete('/:id', requireAuth, async (req: any, res) => {
 router.get('/:id/commands', requireAuth, async (req: any, res) => {
   try {
     const { id } = req.params;
-    // Verify access: collaborator or public sketch
+    // ABAC gate
+    const abacAllowed = await opentdfService.checkAccess(req.username, id);
+    if (!abacAllowed) {
+      res.status(403).json({ error: 'Access denied by policy' });
+      return;
+    }
     const sketch = await prisma.sketch.findFirst({
-      where: {
-        id,
-        OR: [
-          { collaborators: { some: { userId: req.userId } } },
-          { public: true },
-        ],
-      },
+      where: { id },
       select: { id: true },
     });
     if (!sketch) {
@@ -192,15 +191,13 @@ router.get('/:id/commands', requireAuth, async (req: any, res) => {
 router.post('/:id/commands', requireAuth, async (req: any, res) => {
   try {
     const { id } = req.params;
-    // Verify write access: must be a collaborator (owner or collaborator role)
-    const collab = await prisma.sketchCollaborator.findUnique({
-      where: { sketchId_userId: { sketchId: id, userId: req.userId } },
-    });
-    if (!collab) {
+    // ABAC gate — all ABAC-permitted users can write (owner or collaborator)
+    const abacAllowed = await opentdfService.checkAccess(req.username, id);
+    if (!abacAllowed) {
       res.status(403).json({ error: 'Write access denied' });
       return;
     }
-    const newCommands = req.body; // Array of commands
+    const newCommands = req.body;
     const commandsToCreate = newCommands.map((cmd: any) => ({
       id: cmd.id,
       ts: new Date(cmd.ts),

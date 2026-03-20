@@ -8,6 +8,7 @@
  *   Namespace: https://skedoodle.com
  *   Attribute: sketch-access (rule: AnyOf)
  *   Values: one per sketch ID
+ *   Subject mappings: one per user-sketch pair, matching .username
  */
 
 const PLATFORM_URL = process.env.OPENTDF_PLATFORM_URL || 'http://localhost:8080';
@@ -61,7 +62,7 @@ async function rpc(service: string, method: string, body: Record<string, unknown
 // --- Cached IDs ---
 let namespaceId: string | null = null;
 let attributeId: string | null = null;
-const knownValues = new Set<string>(); // sketchIds with existing attribute values
+const knownValueIds = new Map<string, string>(); // sketchId -> attributeValueId
 
 // --- Setup: ensure namespace + attribute definition exist ---
 export async function ensureNamespaceAndAttribute(): Promise<void> {
@@ -86,9 +87,9 @@ export async function ensureNamespaceAndAttribute(): Promise<void> {
     );
     if (existingAttr) {
       attributeId = existingAttr.id;
-      // Cache existing values
+      // Cache existing values with their IDs
       for (const v of existingAttr.values || []) {
-        knownValues.add(v.value);
+        knownValueIds.set(v.value, v.id);
       }
     } else {
       const created = await rpc('policy.attributes.AttributesService', 'CreateAttribute', {
@@ -101,82 +102,225 @@ export async function ensureNamespaceAndAttribute(): Promise<void> {
       console.log(`[OpenTDF] Created attribute: ${ATTRIBUTE_NAME} (${attributeId})`);
     }
 
-    console.log(`[OpenTDF] Ready. Namespace=${namespaceId}, Attribute=${attributeId}, ${knownValues.size} existing values.`);
+    console.log(`[OpenTDF] Ready. Namespace=${namespaceId}, Attribute=${attributeId}, ${knownValueIds.size} existing values.`);
   } catch (err) {
     console.error('[OpenTDF] Setup failed (non-fatal):', err);
   }
 }
 
 // --- Create attribute value for a sketch ---
-export async function ensureSketchAttributeValue(sketchId: string): Promise<void> {
-  if (knownValues.has(sketchId)) return;
+export async function ensureSketchAttributeValue(sketchId: string): Promise<string | null> {
+  const key = sketchId.toLowerCase();
+  if (knownValueIds.has(key)) return knownValueIds.get(key)!;
   if (!attributeId) {
     console.warn('[OpenTDF] Attribute not initialized, skipping value creation.');
-    return;
+    return null;
   }
   try {
-    await rpc('policy.attributes.AttributesService', 'CreateAttributeValue', {
+    const result = await rpc('policy.attributes.AttributesService', 'CreateAttributeValue', {
       attributeId,
       value: sketchId,
     });
-    knownValues.add(sketchId);
-    console.log(`[OpenTDF] Created attribute value for sketch: ${sketchId}`);
+    const valueId = result.value?.id;
+    if (valueId) {
+      knownValueIds.set(key, valueId);
+      console.log(`[OpenTDF] Created attribute value for sketch: ${sketchId} (${valueId})`);
+    }
+    return valueId ?? null;
   } catch (err: any) {
     // May already exist (409 / ALREADY_EXISTS)
     if (err.message?.includes('ALREADY_EXISTS') || err.message?.includes('409')) {
-      knownValues.add(sketchId);
-    } else {
-      console.error(`[OpenTDF] Failed to create attribute value for sketch ${sketchId}:`, err);
+      try {
+        const attrResult = await rpc('policy.attributes.AttributesService', 'ListAttributeValues', {
+          attributeId,
+        });
+        const found = attrResult.values?.find((v: any) => v.value.toLowerCase() === key);
+        if (found) {
+          knownValueIds.set(key, found.id);
+          return found.id;
+        }
+      } catch {
+        // Fall through
+      }
+      return null;
+    }
+    console.error(`[OpenTDF] Failed to create attribute value for sketch ${sketchId}:`, err);
+    return null;
+  }
+}
+
+// --- Create subject mapping for a user-sketch pair ---
+export async function createSubjectMapping(
+  username: string,
+  sketchId: string,
+): Promise<string | null> {
+  let valueId = knownValueIds.get(sketchId.toLowerCase());
+  if (!valueId) {
+    valueId = await ensureSketchAttributeValue(sketchId) ?? undefined;
+    if (!valueId) {
+      console.warn(`[OpenTDF] No attribute value ID for sketch ${sketchId}, skipping subject mapping.`);
+      return null;
     }
   }
-}
-
-// --- Authorization decision cache ---
-const decisionCache = new Map<string, { result: boolean; expiresAt: number }>();
-const CACHE_TTL_MS = 30_000;
-
-export function invalidateAccessCache(userId: string, sketchId: string) {
-  decisionCache.delete(`${userId}:${sketchId}`);
-}
-
-// --- Check access via GetDecisions ---
-export async function checkAccess(userOidcSub: string, sketchId: string): Promise<boolean> {
-  const cacheKey = `${userOidcSub}:${sketchId}`;
-  const cached = decisionCache.get(cacheKey);
-  if (cached && Date.now() < cached.expiresAt) {
-    return cached.result;
+  try {
+    const result = await rpc(
+      'policy.subjectmapping.SubjectMappingService',
+      'CreateSubjectMapping',
+      {
+        attributeValueId: valueId,
+        actions: [{ name: 'read' }],
+        newSubjectConditionSet: {
+          subjectSets: [{
+            conditionGroups: [{
+              booleanOperator: 'CONDITION_BOOLEAN_TYPE_ENUM_OR',
+              conditions: [{
+                subjectExternalSelectorValue: '.username',
+                operator: 'SUBJECT_MAPPING_OPERATOR_ENUM_IN',
+                subjectExternalValues: [username],
+              }],
+            }],
+          }],
+        },
+      },
+    );
+    const mappingId = result.subjectMapping?.id ?? null;
+    if (mappingId) {
+      console.log(`[OpenTDF] Created subject mapping for ${username} -> sketch ${sketchId} (${mappingId})`);
+    }
+    return mappingId;
+  } catch (err) {
+    console.error(`[OpenTDF] Failed to create subject mapping for ${username} -> sketch ${sketchId}:`, err);
+    return null;
   }
+}
 
+// --- Delete a subject mapping ---
+export async function deleteSubjectMapping(mappingId: string): Promise<void> {
+  try {
+    await rpc(
+      'policy.subjectmapping.SubjectMappingService',
+      'DeleteSubjectMapping',
+      { id: mappingId },
+    );
+    console.log(`[OpenTDF] Deleted subject mapping: ${mappingId}`);
+  } catch (err) {
+    console.error(`[OpenTDF] Failed to delete subject mapping ${mappingId}:`, err);
+  }
+}
+
+// --- Fetch all skedoodle subject mappings (filtered client-side by namespace) ---
+async function listSkedoodleSubjectMappings(): Promise<any[]> {
+  const result = await rpc(
+    'policy.subjectmapping.SubjectMappingService',
+    'ListSubjectMappings',
+  );
+  const all = result.subjectMappings || [];
+  return all.filter((m: any) => (m.attributeValue?.fqn || '').startsWith(NAMESPACE_FQN));
+}
+
+// --- Extract username from a subject mapping's condition set ---
+function extractUsername(mapping: any): string | null {
+  const conditionGroups = mapping.subjectConditionSet?.subjectSets?.[0]?.conditionGroups || [];
+  for (const group of conditionGroups) {
+    for (const cond of group.conditions || []) {
+      if (cond.subjectExternalSelectorValue === '.username' && cond.subjectExternalValues?.length) {
+        return cond.subjectExternalValues[0];
+      }
+    }
+  }
+  return null;
+}
+
+// --- List subject mappings for a sketch (collaborators) ---
+export async function listSubjectMappingsForSketch(
+  sketchId: string,
+): Promise<{ username: string; mappingId: string }[]> {
+  try {
+    const mappings = await listSkedoodleSubjectMappings();
+    const suffix = `/value/${sketchId.toLowerCase()}`;
+    const matches: { username: string; mappingId: string }[] = [];
+
+    for (const m of mappings) {
+      if (!(m.attributeValue?.fqn || '').endsWith(suffix)) continue;
+      const username = extractUsername(m);
+      if (username) {
+        matches.push({ username, mappingId: m.id });
+      }
+    }
+    return matches;
+  } catch (err) {
+    console.error(`[OpenTDF] Failed to list subject mappings for sketch ${sketchId}:`, err);
+    return [];
+  }
+}
+
+// --- List sketch IDs a user has access to (via subject mappings) ---
+export async function listSketchIdsForUser(username: string): Promise<string[]> {
+  try {
+    const mappings = await listSkedoodleSubjectMappings();
+    const fqnPrefix = `${NAMESPACE_FQN}/attr/${ATTRIBUTE_NAME}/value/`;
+    const sketchIds: string[] = [];
+
+    for (const m of mappings) {
+      const fqn: string = m.attributeValue?.fqn || '';
+      if (!fqn.startsWith(fqnPrefix)) continue;
+      const extractedUsername = extractUsername(m);
+      if (extractedUsername === username) {
+        sketchIds.push(fqn.slice(fqnPrefix.length).toUpperCase());
+      }
+    }
+    return sketchIds;
+  } catch (err) {
+    console.error(`[OpenTDF] Failed to list sketch IDs for user ${username}:`, err);
+    return [];
+  }
+}
+
+// --- Find subject mapping ID for a user-sketch pair ---
+export async function findSubjectMappingId(
+  username: string,
+  sketchId: string,
+): Promise<string | null> {
+  const mappings = await listSubjectMappingsForSketch(sketchId);
+  const match = mappings.find(m => m.username === username);
+  return match?.mappingId ?? null;
+}
+
+// --- Check access via GetDecisions (no cache, fail-closed) ---
+export async function checkAccess(username: string, sketchId: string): Promise<boolean> {
   try {
     const fqn = `${NAMESPACE_FQN}/attr/${ATTRIBUTE_NAME}/value/${sketchId}`;
-    const result = await rpc('authorization.AuthorizationService', 'GetDecisions', {
+    const decisionRequest = {
       decisionRequests: [{
-        actions: [{ standard: 'STANDARD_ACTION_TRANSMIT' }],
+        actions: [{ name: 'read' }],
         entityChains: [{
           id: 'user',
-          entities: [{ emailAddress: userOidcSub }],
+          entities: [{ userName: username }],
         }],
         resourceAttributes: [{
           attributeValueFqns: [fqn],
         }],
       }],
-    });
-
+    };
+    const result = await rpc('authorization.AuthorizationService', 'GetDecisions', decisionRequest);
     const decision = result.decisionResponses?.[0]?.decision;
     const allowed = decision === 'DECISION_PERMIT';
 
-    decisionCache.set(cacheKey, { result: allowed, expiresAt: Date.now() + CACHE_TTL_MS });
+    console.log(`[OpenTDF] GetDecisions for ${username} on sketch ${sketchId}: ${decision}`);
     return allowed;
   } catch (err) {
-    console.error(`[OpenTDF] GetDecisions failed for ${userOidcSub}:${sketchId}:`, err);
-    // Fail open — fall back to DB-based check
-    return true;
+    console.error(`[OpenTDF] GetDecisions failed for ${username}:${sketchId}:`, err);
+    return false;
   }
 }
 
 export const opentdfService = {
   ensureNamespaceAndAttribute,
   ensureSketchAttributeValue,
+  createSubjectMapping,
+  deleteSubjectMapping,
+  listSubjectMappingsForSketch,
+  listSketchIdsForUser,
+  findSubjectMappingId,
   checkAccess,
-  invalidateAccessCache,
 };

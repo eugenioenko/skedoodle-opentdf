@@ -4,10 +4,8 @@ import { Command, SketchRole } from '@/sync/sync.model';
 const API_BASE_URL = import.meta.env.VITE_API_URL;
 
 export interface Collaborator {
-  userId: string;
   username: string;
   role: string;
-  createdAt?: string;
 }
 
 export interface SketchMeta {
@@ -20,7 +18,6 @@ export interface SketchMeta {
   positionX?: number;
   positionY?: number;
   zoom?: number;
-  public?: boolean;
   ownerName?: string;
   role?: SketchRole;
   collaborators?: Collaborator[];
@@ -143,19 +140,6 @@ async function getAllSketches(): Promise<SketchMeta[]> {
   }
 }
 
-async function getCommunitySketches(): Promise<SketchMeta[]> {
-  try {
-    const response = await fetch(`${API_BASE_URL}/sketches/community`);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch community sketches: ${response.statusText}`);
-    }
-    return await response.json();
-  } catch (error) {
-    console.error('Error getting community sketches:', error);
-    return [];
-  }
-}
-
 async function getCollaborators(sketchId: string): Promise<Collaborator[]> {
   try {
     const response = await authenticatedFetch(`${API_BASE_URL}/sketches/${sketchId}/collaborators`);
@@ -179,8 +163,8 @@ async function addCollaborator(sketchId: string, username: string): Promise<Coll
   return await response.json();
 }
 
-async function removeCollaborator(sketchId: string, userId: string): Promise<void> {
-  const response = await authenticatedFetch(`${API_BASE_URL}/sketches/${sketchId}/collaborators/${userId}`, {
+async function removeCollaborator(sketchId: string, username: string): Promise<void> {
+  const response = await authenticatedFetch(`${API_BASE_URL}/sketches/${sketchId}/collaborators/${username}`, {
     method: 'DELETE',
   });
   if (!response.ok) {
@@ -190,9 +174,9 @@ async function removeCollaborator(sketchId: string, userId: string): Promise<voi
 }
 
 async function leaveSketch(sketchId: string): Promise<void> {
-  const userId = useAuthStore.getState().user?.id;
-  if (!userId) throw new Error('Not authenticated');
-  await removeCollaborator(sketchId, userId);
+  const username = useAuthStore.getState().user?.username;
+  if (!username) throw new Error('Not authenticated');
+  await removeCollaborator(sketchId, username);
 }
 
 export const storageClient = {
@@ -203,7 +187,6 @@ export const storageClient = {
   createSketch,
   deleteSketch,
   getAllSketches,
-  getCommunitySketches,
   getCollaborators,
   addCollaborator,
   removeCollaborator,

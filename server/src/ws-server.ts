@@ -3,6 +3,7 @@ import { Room } from './room';
 import type { ClientMessage, UserInfo, SketchRole } from './protocol';
 import { verifyOidcToken } from './utils/auth';
 import { prisma } from './prisma';
+import { opentdfService } from './services/opentdf.service';
 
 const WS_PORT = process.env.WS_PORT;
 
@@ -22,35 +23,28 @@ wss.on('connection', (ws: WebSocket) => {
   async function handleJoin(message: Extract<ClientMessage, { type: 'join' }>) {
     try {
       const decodedToken = await verifyOidcToken(message.token);
+      const { userId, username } = decodedToken;
       const { sketchId } = message;
 
-      // Determine role from collaborator table
-      const collab = await prisma.sketchCollaborator.findUnique({
-        where: { sketchId_userId: { sketchId, userId: decodedToken.userId } },
-      });
-
-      let role: SketchRole;
-      if (collab) {
-        role = collab.role as SketchRole;
-      } else {
-        // Check if sketch is public (allow as viewer)
-        const sketch = await prisma.sketch.findUnique({
-          where: { id: sketchId },
-          select: { public: true },
-        });
-        if (sketch?.public) {
-          role = 'viewer';
-        } else {
-          ws.send(JSON.stringify({ type: 'error', message: 'Access denied' }));
-          ws.close();
-          return;
-        }
+      // ABAC gate: always verify access via OpenTDF GetDecisions
+      const abacAllowed = await opentdfService.checkAccess(username, sketchId);
+      if (!abacAllowed) {
+        ws.send(JSON.stringify({ type: 'error', message: 'Access denied by policy' }));
+        ws.close();
+        return;
       }
 
+      // Determine role from sketch ownership
+      const sketch = await prisma.sketch.findUnique({
+        where: { id: sketchId },
+        select: { ownerId: true },
+      });
+      const role: SketchRole = sketch?.ownerId === userId ? 'owner' : 'collaborator';
+
       user = {
-        uid: decodedToken.userId,
-        userId: decodedToken.userId,
-        name: message.user.name,
+        uid: userId,
+        userId: userId,
+        name: username,
         color: message.user.color,
       };
       if (!rooms.has(sketchId)) {
