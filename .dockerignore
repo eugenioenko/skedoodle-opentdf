@@ -1,0 +1,14 @@
+Dockerfile
+.dockerignore
+docker-compose.yml
+Caddyfile
+.git
+.github
+.vscode
+.claude
+node_modules
+**/node_modules
+**/dist
+server/prisma/dev.db
+README.md
+collaboration.md

@@ -1,0 +1,419 @@
+import { SlideInput } from "./ui/slide-input";
+import {
+  IconAngle,
+  IconArrowsHorizontal,
+  IconBolt,
+  IconBorderCornerRounded,
+  IconBrush,
+  IconChartScatter3d,
+  IconCircleDot,
+  IconLetterT,
+  IconLine,
+  IconLink,
+  IconLinkOff,
+  IconSquare,
+  IconVectorSpline,
+  IconVectorTriangle,
+  IconWaveSine,
+} from "@tabler/icons-react";
+import { useBezierStore } from "@/canvas/tools/bezier.tool";
+import { useBrushStore } from "@/canvas/tools/brush.tool";
+import { useLineStore } from "@/canvas/tools/line.tool";
+import { useTextStore } from "@/canvas/tools/text.tool";
+import { ColorInput } from "./ui/color-input";
+import { useOptionsStore } from "@/canvas/canvas.store";
+import { useSquareStore } from "@/canvas/tools/square.tool";
+import { ToggleButton, ToggleGroup } from "./ui/button";
+import { WithTooltip } from "./ui/tooltip";
+import { ToolHint } from "./ui/tool-hint";
+import { useSyncedColor } from "@/hooks/use-synced-color";
+import { RgbaColor } from "colord";
+
+export const ToolOptions = () => {
+  let selectedTool = useOptionsStore((state) => state.selectedTool);
+  const restoreTool = useOptionsStore((state) => state.restoreTool);
+  if (restoreTool) {
+    selectedTool = restoreTool;
+  }
+
+  if (selectedTool === "brush") {
+    return <BrushToolOptions />;
+  }
+
+  if (selectedTool === "square") {
+    return <SquareToolOptions />;
+  }
+
+  if (selectedTool === "ellipse") {
+    return <EllipseToolOptions />;
+  }
+
+  if (selectedTool === "bezier") {
+    return <BezierToolOptions />;
+  }
+
+  if (selectedTool === "line" || selectedTool === "arrow") {
+    return <LineToolOptions />;
+  }
+
+  if (selectedTool === "text") {
+    return <TextToolOptions />;
+  }
+
+  if (selectedTool === "node") {
+    return <ToolHint hint="Click a shape to edit its nodes. Drag to reshape." />;
+  }
+
+  if (selectedTool === "eraser") {
+    return <ToolHint hint="Click a shape to erase it." />;
+  }
+
+  if (selectedTool === "pointer") {
+    return <ToolHint hint="Click a shape to select it." />;
+  }
+
+  if (selectedTool === "hand") {
+    return <ToolHint hint="Drag canvas to move it." />;
+  }
+
+  if (selectedTool === "zoom") {
+    return <ToolHint hint="Click canvas to zoom in or out." />;
+  }
+
+
+  return null;
+};
+
+// Toggle button that syncs/unsyncs all tool colors.
+// Receives the current tool's local colors so toggling ON snaps global to them.
+interface SyncColorsButtonProps {
+  strokeColor?: RgbaColor;
+  fillColor?: RgbaColor;
+}
+
+const SyncColorsButton = ({ strokeColor, fillColor }: SyncColorsButtonProps) => {
+  const syncColors = useOptionsStore((state) => state.syncColors);
+  const { setSyncColors, setGlobalStrokeColor, setGlobalFillColor } =
+    useOptionsStore.getState();
+
+  const handleToggle = () => {
+    if (!syncColors) {
+      if (strokeColor) setGlobalStrokeColor(strokeColor);
+      if (fillColor) setGlobalFillColor(fillColor);
+      setSyncColors(true);
+    } else {
+      setSyncColors(false);
+    }
+  };
+
+  return (
+    <WithTooltip tooltip={syncColors ? "Unlink tool colors" : "Link all tool colors"}>
+      <ToggleButton isSelected={syncColors} onClick={handleToggle}>
+        {syncColors ? <IconLink size={16} stroke={1} /> : <IconLinkOff size={16} stroke={1} />}
+      </ToggleButton>
+    </WithTooltip>
+  );
+};
+
+const BrushToolOptions = () => {
+  const strokeWidth = useBrushStore((state) => state.strokeWidth);
+  const tolerance = useBrushStore((state) => state.tolerance);
+  const stabilizer = useBrushStore((state) => state.stabilizer);
+  const showStabilizerDot = useBrushStore((state) => state.showStabilizerDot);
+  const liveSimplification = useBrushStore((state) => state.liveSimplification);
+  const localStrokeColor = useBrushStore((state) => state.strokeColor);
+  const simplifyAlgo = useBrushStore((state) => state.simplifyAlgo);
+  const cornerDetection = useBrushStore((state) => state.cornerDetection);
+  const cornerAngle = useBrushStore((state) => state.cornerAngle);
+
+  const {
+    setStrokeColor: setLocalStrokeColor,
+    setStrokeWidth,
+    setStabilizer,
+    setShowStabilizerDot,
+    setLiveSimplification,
+    setTolerance,
+    setSimplifyAlgo,
+    setCornerDetection,
+    setCornerAngle,
+  } = useBrushStore.getState();
+
+  const [strokeColor, setStrokeColor] = useSyncedColor(localStrokeColor, setLocalStrokeColor, "stroke");
+
+  return (
+    <div className="flex flex-row gap-1.5 text-xs items-center">
+      {/* Color */}
+      <SyncColorsButton strokeColor={localStrokeColor} />
+      <ColorInput value={strokeColor} onChange={(value) => setStrokeColor(value)} />
+
+      <div className="w-px self-stretch bg-white/10 mx-0.5" />
+
+      {/* Stroke width */}
+      <WithTooltip tooltip="Stroke width">
+        <SlideInput
+          className="max-w-20"
+          value={strokeWidth}
+          min={1}
+          max={256}
+          onChange={(value) => setStrokeWidth(value)}
+          icon={IconBrush}
+        />
+      </WithTooltip>
+
+      <div className="w-px self-stretch bg-white/10 mx-0.5" />
+
+      {/* Stabilizer */}
+      <WithTooltip tooltip={showStabilizerDot ? "Hide stabilizer dot" : "Show stabilizer dot"}>
+        <ToggleButton isSelected={showStabilizerDot} onClick={() => setShowStabilizerDot(!showStabilizerDot)}>
+          <IconCircleDot size={16} stroke={1} />
+        </ToggleButton>
+      </WithTooltip>
+      <WithTooltip tooltip="Stabilizer — lags the stroke behind the cursor to reduce hand tremor (0 = off)">
+        <SlideInput
+          className="max-w-20"
+          value={stabilizer}
+          min={0}
+          max={100}
+          onChange={(value) => setStabilizer(value)}
+          icon={IconChartScatter3d}
+        />
+      </WithTooltip>
+
+      <div className="w-px self-stretch bg-white/10 mx-0.5" />
+
+      {/* Simplification */}
+      <WithTooltip tooltip={liveSimplification ? "Disable live simplification" : "Enable live simplification — applies smoothing during drawing for a consistent preview"}>
+        <ToggleButton isSelected={liveSimplification} onClick={() => setLiveSimplification(!liveSimplification)}>
+          <IconBolt size={16} stroke={1} />
+        </ToggleButton>
+      </WithTooltip>
+      <WithTooltip tooltip="Smoothing — reduces node count on stroke completion (0 = off)">
+        <SlideInput
+          className="max-w-20"
+          value={tolerance}
+          min={0}
+          max={100}
+          onChange={(value) => setTolerance(value)}
+          icon={IconWaveSine}
+        />
+      </WithTooltip>
+      <ToggleGroup>
+        <WithTooltip tooltip="Smooth — all nodes stay curved, best for organic flowing strokes">
+          <ToggleButton isSelected={simplifyAlgo === "smooth"} onClick={() => setSimplifyAlgo("smooth")}>
+            <IconVectorSpline size={20} stroke={1} />
+          </ToggleButton>
+        </WithTooltip>
+        <WithTooltip tooltip="Precise — preserves visually significant nodes, best for writing and geometric shapes">
+          <ToggleButton isSelected={simplifyAlgo === "precise"} onClick={() => setSimplifyAlgo("precise")}>
+            <IconVectorTriangle size={20} stroke={1} />
+          </ToggleButton>
+        </WithTooltip>
+      </ToggleGroup>
+      {simplifyAlgo === "precise" && (
+        <>
+          <WithTooltip tooltip={cornerDetection ? "Disable corner detection" : "Enable corner detection — sharp turns render as hard edges instead of curves"}>
+            <ToggleButton isSelected={cornerDetection} onClick={() => setCornerDetection(!cornerDetection)}>
+              <IconAngle size={16} stroke={1} />
+            </ToggleButton>
+          </WithTooltip>
+          {cornerDetection && (
+            <WithTooltip tooltip="Corner angle — minimum turn angle to detect as a hard corner (lower = more corners detected)">
+              <SlideInput
+                className="max-w-20"
+                value={cornerAngle}
+                min={1}
+                max={180}
+                onChange={(value) => setCornerAngle(value)}
+                icon={IconAngle}
+              />
+            </WithTooltip>
+          )}
+        </>
+      )}
+    </div>
+  );
+};
+
+const SquareToolOptions = () => {
+  const strokeWidth = useSquareStore((state) => state.strokeWidth);
+  const localStrokeColor = useSquareStore((state) => state.strokeColor);
+  const localFillColor = useSquareStore((state) => state.fillColor);
+  const radius = useSquareStore((state) => state.radius);
+  const { setStrokeColor: setLocalStrokeColor, setStrokeWidth, setFillColor: setLocalFillColor, setRadius } =
+    useSquareStore.getState();
+
+  const [strokeColor, setStrokeColor] = useSyncedColor(localStrokeColor, setLocalStrokeColor, "stroke");
+  const [fillColor, setFillColor] = useSyncedColor(localFillColor, setLocalFillColor, "fill");
+
+  return (
+    <div className="flex flex-row gap-2 text-xs items-center">
+      <SyncColorsButton strokeColor={localStrokeColor} fillColor={localFillColor} />
+      <label>Stroke</label>
+      <ColorInput value={strokeColor} onChange={(value) => setStrokeColor(value)} />
+      <label className="pl-2">Fill</label>
+      <ColorInput value={fillColor} onChange={(value) => setFillColor(value)} />
+      <label className="pl-2">Width</label>
+      <SlideInput
+        className="max-w-24"
+        value={strokeWidth}
+        min={0}
+        max={100}
+        onChange={(value) => setStrokeWidth(value)}
+        icon={IconSquare}
+      />
+      <label className="pl-2">Radius</label>
+      <SlideInput
+        className="max-w-24"
+        value={radius}
+        min={0}
+        max={100}
+        onChange={(value) => setRadius(value)}
+        icon={IconBorderCornerRounded}
+      />
+    </div>
+  );
+};
+
+const EllipseToolOptions = () => {
+  const strokeWidth = useSquareStore((state) => state.strokeWidth);
+  const localStrokeColor = useSquareStore((state) => state.strokeColor);
+  const localFillColor = useSquareStore((state) => state.fillColor);
+  const { setStrokeColor: setLocalStrokeColor, setStrokeWidth, setFillColor: setLocalFillColor } =
+    useSquareStore.getState();
+
+  const [strokeColor, setStrokeColor] = useSyncedColor(localStrokeColor, setLocalStrokeColor, "stroke");
+  const [fillColor, setFillColor] = useSyncedColor(localFillColor, setLocalFillColor, "fill");
+
+  return (
+    <div className="flex flex-row gap-2 text-xs items-center">
+      <SyncColorsButton strokeColor={localStrokeColor} fillColor={localFillColor} />
+      <label>Stroke</label>
+      <ColorInput value={strokeColor} onChange={(value) => setStrokeColor(value)} />
+      <label className="pl-2">Fill</label>
+      <ColorInput value={fillColor} onChange={(value) => setFillColor(value)} />
+      <label className="pl-2">Width</label>
+      <SlideInput
+        className="max-w-24"
+        value={strokeWidth}
+        min={0}
+        max={100}
+        onChange={(value) => setStrokeWidth(value)}
+        icon={IconSquare}
+      />
+    </div>
+  );
+};
+
+const TextToolOptions = () => {
+  const fontSize = useTextStore((state) => state.fontSize);
+  const localFillColor = useTextStore((state) => state.fillColor);
+  const fontFamily = useTextStore((state) => state.fontFamily);
+  const { setFillColor: setLocalFillColor, setFontSize, setFontFamily } =
+    useTextStore.getState();
+
+  const [fillColor, setFillColor] = useSyncedColor(localFillColor, setLocalFillColor, "fill");
+
+  return (
+    <div className="flex flex-row gap-2 text-xs items-center">
+      <SyncColorsButton fillColor={localFillColor} />
+      <label>Color</label>
+      <ColorInput value={fillColor} onChange={(value) => setFillColor(value)} />
+      <label className="pl-2">Size</label>
+      <SlideInput
+        className="max-w-24"
+        value={fontSize}
+        min={8}
+        max={256}
+        onChange={(value) => setFontSize(value)}
+        icon={IconLetterT}
+      />
+      <label className="pl-2">Font</label>
+      <select
+        className="bg-default-3 border border-default-1 rounded px-2 py-1 text-xs"
+        value={fontFamily}
+        onChange={(e) => setFontFamily(e.target.value)}
+      >
+        <option value="sans-serif">Sans Serif</option>
+        <option value="serif">Serif</option>
+        <option value="monospace">Monospace</option>
+        <option value="cursive">Cursive</option>
+      </select>
+    </div>
+  );
+};
+
+const BezierToolOptions = () => {
+  const strokeWidth = useBezierStore((state) => state.strokeWidth);
+  const localStrokeColor = useBezierStore((state) => state.strokeColor);
+  const localFillColor = useBezierStore((state) => state.fillColor);
+  const { setStrokeColor: setLocalStrokeColor, setStrokeWidth, setFillColor: setLocalFillColor } =
+    useBezierStore.getState();
+
+  const [strokeColor, setStrokeColor] = useSyncedColor(localStrokeColor, setLocalStrokeColor, "stroke");
+  const [fillColor, setFillColor] = useSyncedColor(localFillColor, setLocalFillColor, "fill");
+
+  return (
+    <div className="flex flex-row gap-2 text-xs items-center">
+      <SyncColorsButton strokeColor={localStrokeColor} fillColor={localFillColor} />
+      <label>Stroke</label>
+      <ColorInput value={strokeColor} onChange={(value) => setStrokeColor(value)} />
+      <label className="pl-2">Fill</label>
+      <ColorInput value={fillColor} onChange={(value) => setFillColor(value)} />
+      <label className="pl-2">Width</label>
+      <SlideInput
+        className="max-w-24"
+        value={strokeWidth}
+        min={0}
+        max={100}
+        onChange={(value) => setStrokeWidth(value)}
+        icon={IconLine}
+      />
+    </div>
+  );
+};
+
+const LineToolOptions = () => {
+  const strokeWidth = useLineStore((state) => state.strokeWidth);
+  const localStrokeColor = useLineStore((state) => state.strokeColor);
+  const doubleArrow = useLineStore((state) => state.doubleArrow);
+  const selectedTool = useOptionsStore((state) => state.selectedTool);
+  const { setStrokeColor: setLocalStrokeColor, setStrokeWidth, setDoubleArrow } =
+    useLineStore.getState();
+
+  const [strokeColor, setStrokeColor] = useSyncedColor(localStrokeColor, setLocalStrokeColor, "stroke");
+
+  return (
+    <div className="flex flex-row gap-2 text-xs items-center">
+      <SyncColorsButton strokeColor={localStrokeColor} />
+      <label>Color</label>
+      <ColorInput
+        value={strokeColor}
+        onChange={(value) => setStrokeColor(value)}
+      />
+      <label className="pl-2">Width</label>
+      <SlideInput
+        className="max-w-24"
+        value={strokeWidth}
+        min={1}
+        max={100}
+        onChange={(value) => setStrokeWidth(value)}
+        icon={IconLine}
+      />
+      {selectedTool === "arrow" && (
+        <>
+          <label className="pl-2">Double</label>
+          <ToggleGroup>
+            <WithTooltip tooltip="Double-ended arrow">
+              <ToggleButton
+                isSelected={doubleArrow}
+                onClick={() => setDoubleArrow(!doubleArrow)}
+              >
+                <IconArrowsHorizontal size={20} stroke={1} />
+              </ToggleButton>
+            </WithTooltip>
+          </ToggleGroup>
+        </>
+      )}
+    </div>
+  );
+};
